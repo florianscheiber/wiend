@@ -1,0 +1,40 @@
+# IDE
+.idea/
+
+# Pixi
+.pixi/
+
+# Virtual environments
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment files
+.env
+.env.*
+
+# Secrets
+*.pem
+*.key
+
+# Testing
+.pytest_cache/
+
+# Linting
+.ruff_cache/
+
+# Typing
+.mypy_cache/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# macOS
+.DS_Store

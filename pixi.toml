@@ -1,0 +1,22 @@
+[workspace]
+authors = ["florianscheiber-we <florianscheiber2@gmail.com>"]
+channels = ["conda-forge"]
+name = "wiend"
+platforms = ["osx-arm64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python = "3.11.*"
+pip = ">=26.2.1,<27"
+xarray = ">=2026.9.0,<2027"
+zarr = ">=3.1.6,<4"
+python-dotenv = ">=1.2.4,<2"
+truststore = ">=0.10.4,<0.11"
+tqdm = ">=4.70.1,<5"
+
+[pypi-dependencies]
+ruff = ">=0.16.10, <0.17"
+pre-commit = ">=4.6.2, <5"
+pytest = ">=9.1.1, <10"
