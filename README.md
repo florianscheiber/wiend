@@ -31,20 +31,31 @@ ds = wd.download(
     end="2020-12-31",
 )
 
-ds_downscaled = wd.downscale(ds)
+out_path = wd.downscale(
+    input_data=ds,
+    out="wind_downscaled.zarr",
+    bbox=[5, 45, 15, 55],
+    mapping_method="qm",
+    spacing=0.0025,
+)
 
-ds_downscaled.to_zarr("wind.zarr")
+print(out_path)
 
 
 Or:
 
 import wiend as wd
 
-ds_downscaled = wd.download_and_downscale(
-    bbox=[5, 45, 15, 55],
+out_path = wd.download_and_downscale(
+    bbox=[5, 45, 15, 55],  # lon_min, lat_min, lon_max, lat_max
     start="2020-01-01",
     end="2020-12-31",
+    out="wind_downscaled.zarr",
+    mapping_method="qm",
+    spacing=0.0025,
 )
+
+print(out_path)
 
 Design Decisions
 Python >= 3.11

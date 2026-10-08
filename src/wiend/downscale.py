@@ -13,8 +13,11 @@ import zarr
 from tqdm import tqdm
 
 from wiend.data_manager import (
+    DEFAULT_GITHUB_REPOSITORY,
+    DEFAULT_WEIBULL_RELEASE_TAG,
     load_weibull_params_from_zarr,
     load_wind_from_zarr,
+    resolve_weibull_reference_paths,
 )
 from wiend.validation import parse_bbox
 
@@ -428,8 +431,13 @@ def downscale(
     out: str | Path,
     bbox: tuple[float, float, float, float],
     mapping_method: str,
-    params_baseline_path: str | Path,
-    params_manipulator_path: str | Path,
+    params_baseline_path: str | Path | None = None,
+    params_manipulator_path: str | Path | None = None,
+    spacing: float | None = None,
+    cache_dir: str | Path | None = None,
+    github_repository: str = DEFAULT_GITHUB_REPOSITORY,
+    release_tag: str = DEFAULT_WEIBULL_RELEASE_TAG,
+    github_token: str | None = None,
     bbox_order: str = "lonlat",
     no_crop: bool = False,
     overwrite: bool = False,
@@ -460,13 +468,27 @@ def downscale(
     lon_min, lat_min, lon_max, lat_max = parse_bbox(bbox, bbox_order=bbox_order)
     bbox_for_params = (lat_min, lat_max, lon_min, lon_max)
 
+    if params_baseline_path is None or params_manipulator_path is None:
+        resolved_baseline, resolved_manipulator = resolve_weibull_reference_paths(
+            spacing=spacing,
+            cache_dir=cache_dir,
+            github_repository=github_repository,
+            release_tag=release_tag,
+            github_token=github_token,
+        )
+        baseline_path = resolved_baseline
+        manipulator_path = resolved_manipulator
+    else:
+        baseline_path = Path(params_baseline_path)
+        manipulator_path = Path(params_manipulator_path)
+
     k_b, a_b = load_weibull_params_from_zarr(
-        params_baseline_path,
+        baseline_path,
         bbox=bbox_for_params,
         crop=not no_crop,
     )
     k_m, a_m = load_weibull_params_from_zarr(
-        params_manipulator_path,
+        manipulator_path,
         bbox=bbox_for_params,
         crop=not no_crop,
     )
