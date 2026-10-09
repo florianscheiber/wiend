@@ -18,6 +18,9 @@ __pycache__/
 .env
 .env.*
 
+# Data
+data/
+
 # Secrets
 *.pem
 *.key

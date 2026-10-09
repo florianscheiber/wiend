@@ -145,23 +145,18 @@ def _select_asset(
     role_key: str,
     spacing: float | None,
 ) -> dict[str, Any]:
-    spacing_token = _spacing_token(spacing)
     matches: list[dict[str, Any]] = []
     for asset in assets:
         name = str(asset.get("name", "")).lower()
         if role_key not in name:
             continue
-        if spacing_token and spacing_token not in name:
-            continue
         matches.append(asset)
 
     if not matches:
-        raise RuntimeError(f"No release asset found for role={role_key!r} and spacing={spacing!r}.")
+        raise RuntimeError(f"No release asset found for role={role_key!r}.")
     if len(matches) > 1:
         names = ", ".join(str(a.get("name", "<unknown>")) for a in matches)
-        raise RuntimeError(
-            f"Multiple release assets matched role={role_key!r} and spacing={spacing!r}: {names}"
-        )
+        raise RuntimeError(f"Multiple release assets matched role={role_key!r}: {names}")
     return matches[0]
 
 

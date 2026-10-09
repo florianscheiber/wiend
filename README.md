@@ -80,3 +80,4 @@ pytest
 Run tests with:
 bash
 pixi run pytest tests/ -v
+All tests and linting run automatically on GitHub via CI when you push.
