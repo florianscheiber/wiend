@@ -8,6 +8,12 @@ version = "0.1.0"
 description = "ERA5 wind download, downscaling and bias correction using Weibull parameter maps."
 requires-python = ">=3.11"
 license = { text = "MIT" }
+dependencies = [
+    "xarray>=2022.0",
+    "numpy>=1.21",
+    "zarr>=2.10",
+    "tqdm>=4.50",
+]
 urls = { "Repository" = "https://github.com/florianscheiber/wiend" }
 
 [tool.setuptools]

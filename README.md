@@ -74,3 +74,9 @@ Pixi
 Ruff
 pre-commit
 pytest
+
+## Testing
+
+Run tests with:
+bash
+pixi run pytest tests/ -v
