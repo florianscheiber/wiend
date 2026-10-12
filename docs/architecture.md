@@ -49,6 +49,7 @@ This allows repeat usage without re-downloading the same asset, while keeping th
 - Geographic scope: Europe only
 - Output format: `xarray.Dataset` and Zarr
 - Supported Python: 3.11 or newer
+- Shell snippets in the docs assume a POSIX-style terminal; Windows users should use equivalent PowerShell or cmd commands for environment variables and temporary paths
 
 ## Packaging and distribution
 

@@ -17,6 +17,7 @@ Requirements
 - Python 3.11 or newer
 - EDH access token via `EDH_TOKEN` or `EDH_KEY`
 - Internet access for the first Weibull data download
+- The shell examples below use a POSIX-style terminal; Windows users can set environment variables with PowerShell or cmd equivalents
 
 Quick start
 
@@ -43,6 +44,10 @@ Quick start
 
    print(out_path)
    ```
+
+Development note
+
+The temporary-clone smoke test is a development-only check for package installation. End users should install `wiend` from PyPI and do not need a local clone.
 
 Data
 
