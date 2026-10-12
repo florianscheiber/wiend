@@ -9,8 +9,13 @@ description = "ERA5 wind download, downscaling and bias correction using Weibull
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
+    "dask>=2024.0",
+    "scipy>=1.11",
     "xarray>=2022.0",
     "numpy>=1.21",
+    "fsspec>=2023.0",
+    "aiohttp>=3.9",
+    "requests>=2.31",
     "zarr>=2.10",
     "tqdm>=4.50",
 ]

@@ -244,7 +244,7 @@ def resolve_weibull_reference_paths(
 
     baseline_asset = _select_asset(
         assets,
-        role_key="era5-edh",
+        role_key="baseline",
         spacing=spacing,
     )
     manipulator_asset = _select_asset(

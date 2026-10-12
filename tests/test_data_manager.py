@@ -110,34 +110,34 @@ class TestSelectAsset:
     def test_select_single_matching_asset(self):
         """Test selecting a single matching asset."""
         assets = [
-            {"name": "weibull_era5-edh_spacing-0-0025.zarr", "browser_download_url": "url1"},
-            {"name": "weibull_corrected_spacing-0-0025.zarr", "browser_download_url": "url2"},
+            {"name": "weibull-parameters-baseline-v1.zarr.zip", "browser_download_url": "url1"},
+            {"name": "weibull-parameters-corrected-v1.zarr.zip", "browser_download_url": "url2"},
         ]
-        asset = _select_asset(assets, role_key="era5-edh", spacing=0.0025)
-        assert asset["name"] == "weibull_era5-edh_spacing-0-0025.zarr"
+        asset = _select_asset(assets, role_key="baseline", spacing=0.0025)
+        assert asset["name"] == "weibull-parameters-baseline-v1.zarr.zip"
 
     def test_select_asset_ignores_spacing_when_none(self):
         """Test that spacing filter is skipped when None."""
         assets = [
-            {"name": "weibull_era5-edh.zarr", "browser_download_url": "url1"},
+            {"name": "weibull-parameters-baseline-v1.zarr.zip", "browser_download_url": "url1"},
         ]
-        asset = _select_asset(assets, role_key="era5-edh", spacing=None)
-        assert asset["name"] == "weibull_era5-edh.zarr"
+        asset = _select_asset(assets, role_key="baseline", spacing=None)
+        assert asset["name"] == "weibull-parameters-baseline-v1.zarr.zip"
 
     def test_no_matching_asset(self):
         """Test error when no asset matches."""
         assets = [{"name": "other_file.txt"}]
         with pytest.raises(RuntimeError, match="No release asset found"):
-            _select_asset(assets, role_key="era5-edh", spacing=0.0025)
+            _select_asset(assets, role_key="baseline", spacing=0.0025)
 
     def test_multiple_matching_assets(self):
         """Test error when multiple assets match."""
         assets = [
-            {"name": "weibull_era5-edh_spacing-0-0025_v1.zarr", "browser_download_url": "url1"},
-            {"name": "weibull_era5-edh_spacing-0-0025_v2.zarr", "browser_download_url": "url2"},
+            {"name": "weibull-parameters-baseline-v1.zarr.zip", "browser_download_url": "url1"},
+            {"name": "weibull-parameters-baseline-v2.zarr.zip", "browser_download_url": "url2"},
         ]
         with pytest.raises(RuntimeError, match="Multiple release assets matched"):
-            _select_asset(assets, role_key="era5-edh", spacing=0.0025)
+            _select_asset(assets, role_key="baseline", spacing=0.0025)
 
 
 class TestResolveWeibullReferencePaths:
@@ -149,11 +149,11 @@ class TestResolveWeibullReferencePaths:
         mock_payload.return_value = {
             "assets": [
                 {
-                    "name": "weibull_era5-edh_spacing-0-0025.zip",
+                    "name": "weibull-parameters-baseline-v1.zarr.zip",
                     "browser_download_url": "https://github.com/...",
                 },
                 {
-                    "name": "weibull_corrected_spacing-0-0025.zip",
+                    "name": "weibull-parameters-corrected-v1.zarr.zip",
                     "browser_download_url": "https://github.com/...",
                 },
             ]
