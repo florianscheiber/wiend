@@ -17,7 +17,7 @@ def test_version():
     """Test that version is correctly set."""
     import wiend as wd
 
-    assert wd.__version__ == "0.1.0"
+    assert wd.__version__ == "0.2.0"
 
 
 def test_api_callability():

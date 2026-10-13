@@ -14,6 +14,8 @@
 - Supported outputs: `xarray.Dataset` and Zarr
 - Geographic scope: Europe only
 - Minimum Python version: 3.11
+- Output spacing defaults to the native 0.0025° Weibull grid. Coarser integer
+  multiples are produced by averaging corrected native-grid wind speeds.
 
 ## Public API
 
@@ -35,6 +37,10 @@ The current release asset naming convention is:
 - `weibull-parameters-corrected-v1.zarr.zip`
 
 These files are associated with the GitHub Release tag `weibull-parameters-v1` and are cached locally under `~/.wiend/` when first used. The library downloads the release assets, unpacks the Zarr archives, and reuses the cached data on later runs.
+
+The release assets are the default reference source. Users may provide local
+baseline and corrected Zarr stores instead; both must use the native 0.0025°
+latitude/longitude grid.
 
 ## Cache strategy
 

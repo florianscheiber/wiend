@@ -24,6 +24,7 @@ from wiend.validation import parse_bbox
 DEFAULT_STORAGE_DTYPE: Literal["float32", "int16"] = "int16"
 DEFAULT_SCALE = 0.1
 DEFAULT_CHUNKS: dict[str, int] = {"time": 168, "lat": 100, "lon": 400}
+NATIVE_SPACING = 0.0025
 
 
 def _default_compressor() -> Any:
@@ -32,6 +33,28 @@ def _default_compressor() -> Any:
         clevel=5,
         shuffle=zarr.codecs.BloscShuffle.bitshuffle,
     )
+
+
+def _normalize_spacing(spacing: float | None) -> tuple[float, int]:
+    """Validate spacing and return it with its native-grid aggregation factor."""
+    value = NATIVE_SPACING if spacing is None else float(spacing)
+    if not np.isfinite(value) or value <= 0:
+        raise ValueError("spacing must be a finite positive number.")
+    factor = int(round(value / NATIVE_SPACING))
+    if factor < 1 or not np.isclose(value, factor * NATIVE_SPACING, rtol=0, atol=1e-10):
+        raise ValueError(
+            f"spacing must be a positive integer multiple of {NATIVE_SPACING} degrees."
+        )
+    return value, factor
+
+
+def _coarsen_axis(values: np.ndarray, factor: int) -> tuple[np.ndarray, np.ndarray]:
+    """Return complete native-grid groups and their centre coordinates."""
+    usable = values.size - values.size % factor
+    if usable == 0:
+        raise ValueError("The selected bbox does not contain a complete output grid cell.")
+    groups = np.arange(usable, dtype=np.int64).reshape(-1, factor)
+    return groups, values[groups].mean(axis=1)
 
 
 def valid_weibull_params_vec(*arrs: np.ndarray) -> np.ndarray:
@@ -265,6 +288,7 @@ def map_weibull_field_to_zarr(
     scale: float = 0.02,
     add_offset: float = 0.0,
     fill_value: int = -32768,
+    spacing: float = NATIVE_SPACING,
 ) -> None:
     method = mapping_method.lower()
     if method not in ("qm", "qdm", "sdm", "dummy", "mc", "sh2", "sh2-simple"):
@@ -274,6 +298,23 @@ def map_weibull_field_to_zarr(
 
     lat_t = np.asarray(k_b["lat"].values)
     lon_t = np.asarray(k_b["lon"].values)
+    output_spacing, aggregation_factor = _normalize_spacing(spacing)
+
+    for name, values in (("latitude", lat_t), ("longitude", lon_t)):
+        differences = np.diff(values)
+        if differences.size and not np.allclose(differences, NATIVE_SPACING, rtol=0, atol=1e-7):
+            raise ValueError(
+                f"Weibull {name} coordinates must have {NATIVE_SPACING} degree spacing."
+            )
+
+    if aggregation_factor > 1:
+        lat_groups, output_lat = _coarsen_axis(lat_t, aggregation_factor)
+        lon_groups, output_lon = _coarsen_axis(lon_t, aggregation_factor)
+    else:
+        lat_groups = np.arange(lat_t.size, dtype=np.int64)[:, None]
+        lon_groups = np.arange(lon_t.size, dtype=np.int64)[:, None]
+        output_lat = lat_t
+        output_lon = lon_t
 
     def _grid_allclose(da: xr.DataArray, name: str) -> None:
         if da.dims != ("lat", "lon"):
@@ -291,7 +332,7 @@ def map_weibull_field_to_zarr(
         _grid_allclose(a_bc, "a_bc")  # type: ignore[arg-type]
 
     t_size = original_wind.sizes["time"]
-    y_size = lat_t.size
+    y_size = output_lat.size
 
     k_b_np = k_b.to_numpy().astype(np.float64, copy=False)
     a_b_np = a_b.to_numpy().astype(np.float64, copy=False)
@@ -310,10 +351,13 @@ def map_weibull_field_to_zarr(
         "interp_method": interp_method,
         "time_min": str(original_wind["time"].values[0]),
         "time_max": str(original_wind["time"].values[-1]),
-        "lat_min": float(lat_t[0]),
-        "lat_max": float(lat_t[-1]),
-        "lon_min": float(lon_t[0]),
-        "lon_max": float(lon_t[-1]),
+        "lat_min": float(output_lat[0]),
+        "lat_max": float(output_lat[-1]),
+        "lon_min": float(output_lon[0]),
+        "lon_max": float(output_lon[-1]),
+        "spacing": output_spacing,
+        "native_spacing": NATIVE_SPACING,
+        "aggregation": "mean_skipna" if aggregation_factor > 1 else "none",
         "height_m": 10,
         "unit wind": "m s-1",
         "storage_dtype": storage_dtype,
@@ -325,8 +369,8 @@ def map_weibull_field_to_zarr(
     root = init_wind_zarr(
         path_out,
         time_values=np.asarray(original_wind["time"].values),
-        lat=lat_t,
-        lon=lon_t,
+        lat=output_lat,
+        lon=output_lon,
         chunks=chunks,
         compressor=compressor,
         storage_dtype=storage_dtype,
@@ -356,12 +400,15 @@ def map_weibull_field_to_zarr(
         t1 = min(t_size, t0 + time_block)
         for i0 in range(0, y_size, block_lat):
             i1 = min(y_size, i0 + block_lat)
-            lat_block = lat_t[i0:i1]
+            lat_indices = lat_groups[i0:i1].reshape(-1)
+            lon_indices = lon_groups.reshape(-1)
+            lat_block = lat_t[lat_indices]
+            lon_block = lon_t[lon_indices]
 
             t_interp0 = time.perf_counter()
             v_da = original_wind.isel(time=slice(t0, t1)).interp(
                 lat=lat_block,
-                lon=lon_t,
+                lon=lon_block,
                 method=interp_method,
             )
             v64 = v_da.to_numpy().astype(np.float64, copy=False)
@@ -371,16 +418,27 @@ def map_weibull_field_to_zarr(
             block = map_wind_block(
                 method=method,  # type: ignore[arg-type]
                 v=v64,
-                k_b=k_b_np[i0:i1, :],
-                a_b=a_b_np[i0:i1, :],
-                k_m=k_m_np[i0:i1, :],
-                a_m=a_m_np[i0:i1, :],
-                k_bc=(k_bc_np[i0:i1, :] if k_bc_np is not None else None),
-                a_bc=(a_bc_np[i0:i1, :] if a_bc_np is not None else None),
+                k_b=k_b_np[lat_indices][:, lon_indices],
+                a_b=a_b_np[lat_indices][:, lon_indices],
+                k_m=k_m_np[lat_indices][:, lon_indices],
+                a_m=a_m_np[lat_indices][:, lon_indices],
+                k_bc=(k_bc_np[lat_indices][:, lon_indices] if k_bc_np is not None else None),
+                a_bc=(a_bc_np[lat_indices][:, lon_indices] if a_bc_np is not None else None),
                 use_shape_scaling=use_shape_scaling,
                 min_k=min_k,
                 eps_q=eps_q,
             )
+            if aggregation_factor > 1:
+                block = np.nanmean(
+                    block.reshape(
+                        block.shape[0],
+                        i1 - i0,
+                        aggregation_factor,
+                        block.shape[2] // aggregation_factor,
+                        aggregation_factor,
+                    ),
+                    axis=(2, 4),
+                )
             t_map1 = time.perf_counter()
 
             t_interp_sum += t_interp1 - t_interp0
@@ -433,7 +491,7 @@ def downscale(
     mapping_method: str,
     params_baseline_path: str | Path | None = None,
     params_manipulator_path: str | Path | None = None,
-    spacing: float | None = None,
+    spacing: float | None = NATIVE_SPACING,
     cache_dir: str | Path | None = None,
     github_repository: str = DEFAULT_GITHUB_REPOSITORY,
     release_tag: str = DEFAULT_WEIBULL_RELEASE_TAG,
@@ -451,6 +509,7 @@ def downscale(
     eps_q: float = 1e-6,
 ) -> Path:
     """Map ERA5 wind to the Weibull reference grid and write result to Zarr."""
+    output_spacing, _ = _normalize_spacing(spacing)
     out_path = Path(out)
     if out_path.exists():
         if not overwrite:
@@ -511,5 +570,6 @@ def downscale(
         use_shape_scaling=use_shape_scaling,
         min_k=min_k,
         eps_q=eps_q,
+        spacing=output_spacing,
     )
     return out_path

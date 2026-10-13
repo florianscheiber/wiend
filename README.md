@@ -1,93 +1,40 @@
-wiend
+# wiend
 
-Python library for downloading ERA5 wind speed time series from Earth Data Hub and applying Weibull-based downscaling and bias correction.
+Python library for downloading ERA5 wind speed time series from Earth Data
+Hub and applying Weibull-based downscaling and bias correction.
 
-Features
-Download ERA5 wind speed data from Earth Data Hub
-Automatic spatial validation for Europe
-Weibull-based downscaling
-Weibull-based bias correction
-Zarr output support
-Xarray-native workflow
-Installation
-pip install wiend
+## Features
 
-Requirements
+- Download ERA5 wind data from Earth Data Hub
+- Automatic spatial validation for Europe
+- Weibull-based downscaling and bias correction
+- Zarr output support
+- Xarray-native workflow
 
-- Python 3.11 or newer
-- EDH access token via `EDH_TOKEN` or `EDH_KEY`
-- Internet access for the first Weibull data download
-- The shell examples below use a POSIX-style terminal; Windows users can set environment variables with PowerShell or cmd equivalents
+## Installation
 
-Quick start
+`wiend` requires Python 3.11 or newer. Install it from PyPI:
 
-1. Install the package:
-   ```bash
-   pip install wiend
-   ```
-2. Set your EDH token:
-   ```bash
-   export EDH_TOKEN="your-token"
-   ```
-3. Run the combined download + downscale workflow:
-   ```python
-   import wiend as wd
+```bash
+python -m pip install wiend
+```
 
-   out_path = wd.download_and_downscale(
-       bbox=[5, 45, 15, 55],
-       start="2020-01-01",
-       end="2020-12-31",
-       out="wind_downscaled.zarr",
-       mapping_method="qm",
-       spacing=0.0025,
-   )
+The runtime dependencies are installed automatically by `pip`.
 
-   print(out_path)
-   ```
+## Quick start
 
-Development note
+Set an Earth Data Hub token before running a download. macOS/Linux:
 
-The temporary-clone smoke test is a development-only check for package installation. End users should install `wiend` from PyPI and do not need a local clone.
+```bash
+export EDH_TOKEN="your-token"
+```
 
-Data
+Windows users should use the equivalent PowerShell or Command Prompt
+environment-variable command.
 
-The package code is distributed through PyPI.
+Then run the combined download and downscale workflow:
 
-The Weibull parameter maps are distributed separately as GitHub Release assets and are downloaded automatically when required due to the file size of the corrected parameters (~950 MB).
-
-GitHub Release tag: weibull-parameters-v1
-
-Release assets:
-
-- `weibull-parameters-baseline-v1.zarr.zip`
-- `weibull-parameters-corrected-v1.zarr.zip`
-
-Local cache location: ~/.wiend/
-
-The library downloads the release assets, extracts the Zarr archives, and reuses the cached data on later runs.
-
-Example
-import wiend as wd
-
-ds = wd.download(
-    bbox=[5, 45, 15, 55],
-    start="2020-01-01",
-    end="2020-12-31",
-)
-
-out_path = wd.downscale(
-    input_data=ds,
-    out="wind_downscaled.zarr",
-    bbox=[5, 45, 15, 55],
-    mapping_method="qm",
-    spacing=0.0025,
-)
-
-print(out_path)
-
-
-Or:
-
+```python
 import wiend as wd
 
 out_path = wd.download_and_downscale(
@@ -100,28 +47,93 @@ out_path = wd.download_and_downscale(
 )
 
 print(out_path)
+```
 
-Design Decisions
-Python >= 3.11
-MIT License
-Distribution via PyPI
-Weibull maps distributed via GitHub Releases
-Europe-only support
-Outputs:
-xarray.Dataset
-Zarr
-Development
+The token can also be passed directly to a function with `edh_key="your-token"`.
+Using an environment variable is recommended so credentials do not appear in
+source code or version control.
 
-The project uses:
+## Public API
 
-Pixi
-Ruff
-pre-commit
-pytest
+The package exposes three main functions:
 
-## Testing
+- `download()` downloads ERA5 wind data and returns an
+  `xarray.DataArray`. It can optionally write the input data to Zarr.
+- `downscale()` maps an existing wind `DataArray` or wind Zarr store to the
+  Weibull reference grid and writes a Zarr output.
+- `download_and_downscale()` combines both operations.
 
-Run tests with:
-bash
+`downscale()` and `download_and_downscale()` accept a `spacing` argument. It
+defaults to `0.0025` degrees, and larger positive integer multiples such as
+`0.01` degrees are aggregated after Weibull correction to reduce output size.
+
+For complete parameter documentation, examples, cache details, and
+troubleshooting, see the
+[full usage guide](https://github.com/florianscheiber/wiend/blob/main/docs/usage.md).
+
+For example, the two separate operations can be used like this:
+
+```python
+import wiend as wd
+
+wind = wd.download(
+    bbox=[5, 45, 15, 55],
+    start="2020-01-01",
+    end="2020-01-02",
+)
+
+out_path = wd.downscale(
+    input_data=wind,
+    out="wind_downscaled.zarr",
+    bbox=[5, 45, 15, 55],
+    mapping_method="qm",
+    spacing=0.0025,
+)
+```
+
+## Weibull parameter data
+
+The Weibull parameter maps are distributed separately as GitHub Release assets
+because the corrected dataset is large (approximately 950 MB). They are
+downloaded automatically when needed, extracted, and cached locally.
+
+- Release tag: `weibull-parameters-v1`
+- `weibull-parameters-baseline-v1.zarr.zip`
+- `weibull-parameters-corrected-v1.zarr.zip`
+- Local cache: `~/.wiend/`
+
+An internet connection and sufficient disk space are required for the first
+automatic data download.
+
+The GitHub Release assets are the default Weibull parameter source. You can
+instead provide local Baseline and Corrected Zarr stores through
+`params_baseline_path` and `params_manipulator_path`; both local stores must
+use the native `0.0025` degree grid.
+
+## Development
+
+Install the package from a source checkout in editable mode:
+
+```bash
+pixi run pip install -e .
+```
+
+Run the test suite:
+
+```bash
 pixi run pytest tests/ -v
-All tests and linting run automatically on GitHub via CI when you push.
+```
+
+Ruff, pytest, and package builds also run automatically in GitHub Actions on
+pushes and pull requests.
+
+The temporary-clone smoke test is a development check only. End users should
+install `wiend` from PyPI and do not need to clone the repository.
+
+## Design decisions
+
+- License: MIT
+- Distribution: PyPI
+- Geographic scope: Europe only
+- Supported outputs: `xarray.Dataset` and Zarr
+- Minimum Python version: 3.11

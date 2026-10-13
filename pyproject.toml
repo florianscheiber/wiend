@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wiend"
-version = "0.1.0"
+version = "0.2.0"
 authors = [{name="Florian Scheiber"}]
 description = "ERA5 wind download, downscaling and bias correction using Weibull parameter maps."
 readme = "README.md"

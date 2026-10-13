@@ -192,7 +192,7 @@ def download_and_downscale(
     mapping_method: str,
     params_baseline_path: str | Path | None = None,
     params_manipulator_path: str | Path | None = None,
-    spacing: float | None = None,
+    spacing: float | None = 0.0025,
     cache_dir: str | Path | None = None,
     github_repository: str = DEFAULT_GITHUB_REPOSITORY,
     release_tag: str = DEFAULT_WEIBULL_RELEASE_TAG,
