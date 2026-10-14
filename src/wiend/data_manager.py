@@ -59,7 +59,7 @@ def build_edh_url(edh_path: str, edh_key: str) -> str:
 
 def load_wind_from_zarr(path_input: str | Path) -> xr.DataArray:
     """Load wind data from Zarr and validate expected structure."""
-    ds = xr.open_zarr(str(path_input))
+    ds = xr.open_zarr(str(path_input), consolidated=False)
 
     if "wind" not in ds:
         raise KeyError(f"Zarr missing variable 'wind'. Found: {list(ds.data_vars)}")
@@ -79,7 +79,7 @@ def load_weibull_params_from_zarr(
     crop: bool = True,
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """Load Weibull parameters k and a with optional bbox crop."""
-    ds = xr.open_zarr(str(path_input))
+    ds = xr.open_zarr(str(path_input), consolidated=False)
 
     if crop:
         if bbox is None:

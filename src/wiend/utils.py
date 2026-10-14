@@ -311,7 +311,7 @@ def write_wind_block_to_zarr(
 def load_wind_from_zarr(path_input: str) -> xr.DataArray:
     """Returns wind("time", "lat", "lon")"""
 
-    ds = xr.open_zarr(path_input)
+    ds = xr.open_zarr(path_input, consolidated=False)
 
     if "wind" not in ds:
         raise KeyError(f"Zarr missing variable 'wind'. Found: {list(ds.data_vars)}")
@@ -334,7 +334,7 @@ def load_weibull_params_from_zarr(
 ) -> tuple[xr.DataArray, xr.DataArray]:
     """Returns a("lat", "lon") and k("lat", "lon")."""
 
-    ds = xr.open_zarr(path_input)
+    ds = xr.open_zarr(path_input, consolidated=False)
 
     if crop:
         if bbox is None:

@@ -302,7 +302,7 @@ def map_weibull_field_to_zarr(
 
     for name, values in (("latitude", lat_t), ("longitude", lon_t)):
         differences = np.diff(values)
-        if differences.size and not np.allclose(differences, NATIVE_SPACING, rtol=0, atol=1e-7):
+        if differences.size and not np.allclose(differences, NATIVE_SPACING, rtol=0, atol=1e-5):
             raise ValueError(
                 f"Weibull {name} coordinates must have {NATIVE_SPACING} degree spacing."
             )

@@ -114,7 +114,7 @@ class TestSpacing:
             storage_dtype="float32",
             spacing=0.01,
         )
-        result = xr.open_zarr(tmp_path / "out.zarr")["wind"]
+        result = xr.open_zarr(tmp_path / "out.zarr", consolidated=False)["wind"]
         assert result.shape == (1, 2, 2)
         np.testing.assert_allclose(result.values, [[[13.5, 17.5], [45.5, 49.5]]])
 
@@ -122,3 +122,32 @@ class TestSpacing:
     def test_invalid_spacing_is_rejected(self, spacing):
         with pytest.raises(ValueError, match="spacing"):
             _normalize_spacing(spacing)
+
+    def test_float32_native_grid_rounding_is_accepted(self, tmp_path):
+        lat = np.arange(8, dtype=np.float32) * 0.0025
+        lon = np.arange(8, dtype=np.float32) * 0.0025
+        wind = xr.DataArray(
+            np.ones((1, 8, 8), dtype=np.float32),
+            dims=("time", "lat", "lon"),
+            coords={"time": [0], "lat": lat, "lon": lon},
+        )
+        params = xr.DataArray(
+            np.ones((8, 8), dtype=np.float32),
+            dims=("lat", "lon"),
+            coords={"lat": lat, "lon": lon},
+        )
+
+        map_weibull_field_to_zarr(
+            "dummy",
+            wind,
+            params,
+            params,
+            params,
+            params,
+            tmp_path / "native-grid-rounding.zarr",
+            None,
+            None,
+            chunks={"time": 1, "lat": 4, "lon": 8},
+            compressor=_default_compressor(),
+            storage_dtype="float32",
+        )

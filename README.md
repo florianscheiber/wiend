@@ -67,6 +67,12 @@ The package exposes three main functions:
 defaults to `0.0025` degrees, and larger positive integer multiples such as
 `0.01` degrees are aggregated after Weibull correction to reduce output size.
 
+For large ERA5 selections, downloads written with `out` are processed in
+time/latitude/longitude chunks instead of being fully materialized in memory.
+The combined workflow uses an intermediate ERA5 Zarr and removes it after a
+successful mapping by default. Pass `keep_download=True` to retain it; failed
+workflows retain it automatically.
+
 For complete parameter documentation, examples, cache details, and
 troubleshooting, see the
 [full usage guide](https://github.com/florianscheiber/wiend/blob/main/docs/usage.md).

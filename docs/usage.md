@@ -117,6 +117,11 @@ Important parameters:
 - `compute`: compute the returned DataArray before returning it.
 - `write_summary`: write a JSON summary next to the output store.
 
+When `out` is provided, the selected ERA5 data is rechunked and written to
+Zarr in time/latitude/longitude blocks, without first materializing the full
+period in memory. `compute` controls eager computation when no output store is
+requested.
+
 ## `downscale()`
 
 `downscale()` maps already downloaded wind data to the Weibull reference grid
@@ -176,9 +181,11 @@ Important parameters:
 
 ## `download_and_downscale()`
 
-`download_and_downscale()` combines the two workflows. It downloads the
-requested ERA5 data in memory and immediately maps it to the Weibull reference
-grid.
+`download_and_downscale()` combines the two workflows. It writes the requested
+ERA5 data to an intermediate Zarr in blocks and maps that store to the Weibull
+reference grid. The intermediate store is named `<out>.era5.zarr` and is
+deleted after successful mapping by default. Set `keep_download=True` to keep
+it; failed workflows retain it automatically.
 
 ```python
 import wiend as wd
@@ -199,6 +206,7 @@ This function accepts the download-related options from `download()` and the
 reference-data/output options from `downscale()`. The `edh_key` argument is
 passed to the EDH download step; GitHub release access is configured
 separately with `github_token`, `github_repository`, and `release_tag`.
+Use `keep_download=True` to retain the intermediate ERA5 Zarr.
 
 ## Weibull data and local cache
 

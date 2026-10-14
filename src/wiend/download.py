@@ -114,10 +114,9 @@ def download(
         chunks={"time": int(edh_time_chunk)},
     )
 
-    if compute:
-        wind_da = wind_da.compute()
-
     if out is None:
+        if compute:
+            wind_da = wind_da.compute()
         return wind_da
 
     out_path = Path(out)
@@ -151,6 +150,7 @@ def download(
     chunks_time = min(int(edh_time_chunk), int(ds_out.sizes.get("time", edh_time_chunk)))
     chunks_lat = min(int(tile_lat), int(ds_out.sizes.get("lat", tile_lat)))
     chunks_lon = min(int(tile_lon), int(ds_out.sizes.get("lon", tile_lon)))
+    ds_out = ds_out.chunk({"time": chunks_time, "lat": chunks_lat, "lon": chunks_lon})
     encoding = {
         "wind": {"dtype": "float32", "chunks": (chunks_time, chunks_lat, chunks_lon)},
         "lat": {"dtype": "float32"},
@@ -163,7 +163,13 @@ def download(
         ds_out.coords[coord_name].encoding = {}
     ds_out.encoding = {}
 
-    ds_out.to_zarr(str(out_path), mode="w", compute=True, encoding=encoding)
+    ds_out.to_zarr(
+        str(out_path),
+        mode="w",
+        compute=True,
+        encoding=encoding,
+        consolidated=False,
+    )
 
     if write_summary:
         summary = {
@@ -207,36 +213,50 @@ def download_and_downscale(
     overwrite: bool = False,
     no_crop: bool = False,
     edh_time_chunk: int = 168,
+    keep_download: bool = False,
 ) -> Path:
     """Download ERA5 wind and run downscaling in one call."""
-    wind_da = download(
-        bbox=bbox,
-        start=start,
-        end=end,
-        out=None,
-        edh_key=edh_key,
-        edh_path=edh_path,
-        height=height,
-        u_var=u_var,
-        v_var=v_var,
-        bbox_order=bbox_order,
-        time_dim=time_dim,
-        edh_time_chunk=edh_time_chunk,
-        compute=True,
-    )
-    return downscale(
-        input_data=wind_da,
-        out=out,
-        bbox=bbox,
-        mapping_method=mapping_method,
-        params_baseline_path=params_baseline_path,
-        params_manipulator_path=params_manipulator_path,
-        spacing=spacing,
-        cache_dir=cache_dir,
-        github_repository=github_repository,
-        release_tag=release_tag,
-        github_token=github_token,
-        bbox_order=bbox_order,
-        no_crop=no_crop,
-        overwrite=overwrite,
-    )
+    out_path = Path(out)
+    download_path = Path(f"{out_path}.era5.zarr")
+    try:
+        download(
+            bbox=bbox,
+            start=start,
+            end=end,
+            out=download_path,
+            edh_key=edh_key,
+            edh_path=edh_path,
+            height=height,
+            u_var=u_var,
+            v_var=v_var,
+            bbox_order=bbox_order,
+            time_dim=time_dim,
+            overwrite=True,
+            edh_time_chunk=edh_time_chunk,
+            compute=False,
+        )
+        result = downscale(
+            input_data=download_path,
+            out=out_path,
+            bbox=bbox,
+            mapping_method=mapping_method,
+            params_baseline_path=params_baseline_path,
+            params_manipulator_path=params_manipulator_path,
+            spacing=spacing,
+            cache_dir=cache_dir,
+            github_repository=github_repository,
+            release_tag=release_tag,
+            github_token=github_token,
+            bbox_order=bbox_order,
+            no_crop=no_crop,
+            overwrite=overwrite,
+        )
+    except Exception:
+        raise
+    else:
+        if not keep_download and download_path.exists():
+            if download_path.is_dir():
+                shutil.rmtree(download_path)
+            else:
+                download_path.unlink()
+        return result
