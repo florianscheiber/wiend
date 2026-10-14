@@ -8,10 +8,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.11"]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +30,9 @@ jobs:
 
       - name: Lint with ruff
         run: ruff check .
+
+      - name: Check formatting with ruff
+        run: ruff format --check .
 
       - name: Run tests with pytest
         run: pytest tests/ -v

@@ -206,7 +206,12 @@ This function accepts the download-related options from `download()` and the
 reference-data/output options from `downscale()`. The `edh_key` argument is
 passed to the EDH download step; GitHub release access is configured
 separately with `github_token`, `github_repository`, and `release_tag`.
-Use `keep_download=True` to retain the intermediate ERA5 Zarr.
+
+Important parameter:
+
+- `keep_download`: defaults to `False`; delete the intermediate
+  `<out>.era5.zarr` after successful mapping. Set it to `True` to retain the
+  intermediate ERA5 Zarr. It is retained automatically when mapping fails.
 
 ## Weibull data and local cache
 
