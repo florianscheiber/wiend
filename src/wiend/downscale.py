@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import time
 from pathlib import Path
@@ -179,6 +180,242 @@ def init_wind_zarr(
         root.attrs.update(attrs)
     root.attrs.update({"_ARRAY_DIMENSIONS": ["time", "lat", "lon"]})
     return root
+
+
+def init_pointwise_zarr(
+    path_out: str | Path,
+    *,
+    time_values: np.ndarray,
+    station: np.ndarray,
+    lat: np.ndarray,
+    lon: np.ndarray,
+    lat_era5: np.ndarray,
+    lon_era5: np.ndarray,
+    chunks: dict[str, int],
+    compressor: Any,
+    storage_dtype: Literal["float32", "int16"],
+    scale: float = 0.02,
+    add_offset: float = 0.0,
+    fill_value: int = -32768,
+    attrs: dict[str, Any] | None = None,
+) -> zarr.Group:
+    """Create a station-oriented Zarr store using the standard wind encoding."""
+    root = zarr.open_group(str(path_out), mode="w")
+    station_chunk = int(chunks.get("station", chunks.get("lat", 100)))
+    time_chunk = int(chunks.get("time", 168))
+    root.create_array(
+        "time",
+        data=time_values,
+        overwrite=True,
+        chunks=(min(time_values.size, time_chunk),),
+        dimension_names=("time",),
+    )
+    root.create_array(
+        "station",
+        data=station,
+        overwrite=True,
+        chunks=(min(station.size, station_chunk),),
+        dimension_names=("station",),
+    )
+    for name, values in (
+        ("lat", lat),
+        ("lon", lon),
+        ("lat_era5", lat_era5),
+        ("lon_era5", lon_era5),
+    ):
+        root.create_array(
+            name,
+            data=np.asarray(values, dtype=np.float32),
+            overwrite=True,
+            chunks=(min(station.size, station_chunk),),
+            dimension_names=("station",),
+        )
+
+    if storage_dtype == "float32":
+        dtype = np.dtype("float32")
+        fill = np.nan
+        wind_attrs: dict[str, Any] = {}
+    else:
+        dtype = np.dtype("int16")
+        fill = int(fill_value)
+        wind_attrs = {
+            "scale_factor": float(scale),
+            "add_offset": float(add_offset),
+            "_FillValue": int(fill_value),
+        }
+    wind_arr = root.create_array(
+        "wind",
+        shape=(time_values.size, station.size),
+        chunks=(min(time_values.size, time_chunk), min(station.size, station_chunk)),
+        dtype=dtype,
+        overwrite=True,
+        fill_value=fill,
+        compressors=compressor,
+        dimension_names=("time", "station"),
+    )
+    wind_arr.attrs.update(wind_attrs)
+    if attrs:
+        root.attrs.update(attrs)
+    root.attrs.update({"_ARRAY_DIMENSIONS": ["time", "station"]})
+    return root
+
+
+def map_pointwise_to_zarr(
+    mapping_method: str,
+    original_wind: xr.DataArray,
+    k_b: xr.DataArray,
+    a_b: xr.DataArray,
+    k_m: xr.DataArray,
+    a_m: xr.DataArray,
+    path_out: str | Path,
+    *,
+    station: np.ndarray,
+    lat: np.ndarray,
+    lon: np.ndarray,
+    lat_era5: np.ndarray,
+    lon_era5: np.ndarray,
+    chunks: dict[str, int],
+    compressor: Any,
+    storage_dtype: Literal["float32", "int16"],
+    scale: float = DEFAULT_SCALE,
+    add_offset: float = 0.0,
+    fill_value: int = -32768,
+    eps_q: float = 1e-6,
+    resume: bool = False,
+) -> None:
+    """Map ERA5 station time series and write the standard encoded Zarr output."""
+    method = mapping_method.lower()
+    if method not in ("qm", "dummy", "mc"):
+        raise ValueError(f"Unknown pointwise mapping_method: {mapping_method!r}")
+    required = ("station",)
+    for name, da in (
+        ("original_wind", original_wind),
+        ("k_b", k_b),
+        ("a_b", a_b),
+        ("k_m", k_m),
+        ("a_m", a_m),
+    ):
+        if da.dims != required and da.dims != ("time", "station"):
+            expected = "(station)" if name != "original_wind" else "(time, station)"
+            raise ValueError(f"{name} must have dims {expected}, got {da.dims}")
+
+    station_count = station.size
+    if any(values.size != station_count for values in (lat, lon, lat_era5, lon_era5)):
+        raise ValueError("Pointwise station coordinates must have the same length.")
+    if original_wind.sizes["station"] != station_count:
+        raise ValueError("original_wind station dimension does not match station coordinates.")
+
+    time_chunk = int(chunks.get("time", 168))
+    station_chunk = int(chunks.get("station", chunks.get("lat", 100)))
+    checkpoint_key = "pointwise_completed_chunks"
+    attrs = {
+        "processing": "mapped",
+        "mapping_method": method,
+        "time_min": str(original_wind["time"].values[0]),
+        "time_max": str(original_wind["time"].values[-1]),
+        "station_count": int(station_count),
+        "storage_dtype": storage_dtype,
+        "chunks_time": time_chunk,
+        "chunks_station": station_chunk,
+        "pointwise_selection": "nearest",
+        "spacing": None,
+        checkpoint_key: "[]",
+    }
+    checkpoint_path = Path(path_out)
+    if resume and checkpoint_path.exists():
+        root = zarr.open_group(str(checkpoint_path), mode="a")
+        if root.attrs.get("pointwise_selection") != "nearest":
+            raise ValueError(f"Invalid pointwise checkpoint: {checkpoint_path}")
+        completed = set(json.loads(root.attrs.get(checkpoint_key, "[]")))
+    else:
+        root = init_pointwise_zarr(
+            path_out,
+            time_values=np.asarray(original_wind["time"].values),
+            station=station,
+            lat=lat,
+            lon=lon,
+            lat_era5=lat_era5,
+            lon_era5=lon_era5,
+            chunks={"time": time_chunk, "station": station_chunk},
+            compressor=compressor,
+            storage_dtype=storage_dtype,
+            scale=scale,
+            add_offset=add_offset,
+            fill_value=fill_value,
+            attrs=attrs,
+        )
+        completed = set()
+
+    n_clipped_total = 0
+    n_filled_total = 0
+    total_chunks = (
+        (original_wind.sizes["time"] + time_chunk - 1)
+        // time_chunk
+        * ((station_count + station_chunk - 1) // station_chunk)
+    )
+    time_starts = range(0, original_wind.sizes["time"], time_chunk)
+    station_starts = range(0, station_count, station_chunk)
+
+    def completed_station_count() -> int:
+        completed_count = 0
+        for station_start in station_starts:
+            if all(
+                f"time-{time_start}-station-{station_start}" in completed
+                for time_start in time_starts
+            ):
+                completed_count += min(station_chunk, station_count - station_start)
+        return completed_count
+
+    print(
+        f"pointwise: {len(completed)}/{total_chunks} chunks complete "
+        f"({completed_station_count()}/{station_count} stations complete)"
+    )
+    for t0 in range(0, original_wind.sizes["time"], time_chunk):
+        t1 = min(original_wind.sizes["time"], t0 + time_chunk)
+        for i0 in range(0, station_count, station_chunk):
+            i1 = min(station_count, i0 + station_chunk)
+            chunk_key = f"time-{t0}-station-{i0}"
+            if chunk_key in completed:
+                continue
+            v = original_wind.isel(time=slice(t0, t1), station=slice(i0, i1)).to_numpy()
+            v = v.astype(np.float64, copy=False)[:, :, None]
+            block = map_wind_block(
+                method=method,  # type: ignore[arg-type]
+                v=v,
+                k_b=k_b.isel(station=slice(i0, i1)).to_numpy()[:, None],
+                a_b=a_b.isel(station=slice(i0, i1)).to_numpy()[:, None],
+                k_m=k_m.isel(station=slice(i0, i1)).to_numpy()[:, None],
+                a_m=a_m.isel(station=slice(i0, i1)).to_numpy()[:, None],
+                k_bc=None,
+                a_bc=None,
+                use_shape_scaling=False,
+                min_k=0.01,
+                eps_q=eps_q,
+            )[:, :, 0]
+            if storage_dtype == "float32":
+                root["wind"][t0:t1, i0:i1] = block
+            else:
+                encoded, clipped, filled = encode_float32_to_int16_block(
+                    block,
+                    scale=scale,
+                    add_offset=add_offset,
+                    fill_value=fill_value,
+                )
+                root["wind"][t0:t1, i0:i1] = encoded
+                n_clipped_total += clipped
+                n_filled_total += filled
+            completed.add(chunk_key)
+            root.attrs[checkpoint_key] = json.dumps(sorted(completed))
+            print(
+                f"pointwise: {len(completed)}/{total_chunks} chunks complete "
+                f"({completed_station_count()}/{station_count} stations complete)"
+            )
+    root.attrs.update(
+        {
+            "int16_clipped_values": int(n_clipped_total),
+            "int16_filled_values": int(n_filled_total),
+        }
+    )
 
 
 def map_wind_block(

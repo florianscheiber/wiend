@@ -15,7 +15,20 @@ from wiend.data_manager import (
     build_edh_url,
     load_edh_key,
 )
-from wiend.downscale import downscale
+from wiend.downscale import (
+    DEFAULT_CHUNKS,
+    DEFAULT_SCALE,
+    _default_compressor,
+    downscale,
+    map_pointwise_to_zarr,
+)
+from wiend.pointwise import (
+    get_pointwise_wind_da,
+    load_pointwise_params,
+    load_pointwise_wind_checkpoint,
+    load_station_locations,
+    write_pointwise_wind_checkpoint,
+)
 from wiend.validation import normalize_wind_da, parse_bbox
 
 
@@ -191,7 +204,8 @@ def download(
 
 def download_and_downscale(
     *,
-    bbox: tuple[float, float, float, float],
+    bbox: tuple[float, float, float, float] | None = None,
+    stations: str | Path | None = None,
     start: str,
     end: str,
     out: str | Path,
@@ -216,6 +230,34 @@ def download_and_downscale(
     keep_download: bool = False,
 ) -> Path:
     """Download ERA5 wind and run downscaling in one call."""
+    if stations is not None:
+        if bbox is not None:
+            raise ValueError("Pass either stations or bbox, not both.")
+        return _download_and_downscale_pointwise(
+            stations=stations,
+            start=start,
+            end=end,
+            out=out,
+            mapping_method=mapping_method,
+            params_baseline_path=params_baseline_path,
+            params_manipulator_path=params_manipulator_path,
+            cache_dir=cache_dir,
+            github_repository=github_repository,
+            release_tag=release_tag,
+            github_token=github_token,
+            edh_key=edh_key,
+            edh_path=edh_path,
+            height=height,
+            u_var=u_var,
+            v_var=v_var,
+            time_dim=time_dim,
+            overwrite=overwrite,
+            edh_time_chunk=edh_time_chunk,
+            keep_download=keep_download,
+        )
+    if bbox is None:
+        raise ValueError("bbox is required unless stations is provided.")
+
     out_path = Path(out)
     download_path = Path(f"{out_path}.era5.zarr")
     try:
@@ -260,3 +302,115 @@ def download_and_downscale(
             else:
                 download_path.unlink()
         return result
+
+
+def _download_and_downscale_pointwise(
+    *,
+    stations: str | Path,
+    start: str,
+    end: str,
+    out: str | Path,
+    mapping_method: str,
+    params_baseline_path: str | Path | None,
+    params_manipulator_path: str | Path | None,
+    cache_dir: str | Path | None,
+    github_repository: str,
+    release_tag: str,
+    github_token: str | None,
+    edh_key: str | None,
+    edh_path: str | None,
+    height: str,
+    u_var: str | None,
+    v_var: str | None,
+    time_dim: str,
+    overwrite: bool,
+    edh_time_chunk: int,
+    keep_download: bool,
+) -> Path:
+    """Run the experimental station-based download and downscale workflow."""
+    locations = load_station_locations(stations)
+    out_path = Path(out)
+    era5_checkpoint_path = Path(f"{out_path}.pointwise.era5.zarr")
+    mapping_checkpoint_path = Path(f"{out_path}.pointwise.mapping.zarr")
+    if out_path.exists() and not overwrite:
+        raise ValueError(f"Output {out_path} exists; set overwrite=True to replace.")
+    if params_baseline_path is None or params_manipulator_path is None:
+        from wiend.data_manager import resolve_weibull_reference_paths
+
+        baseline_path, manipulator_path = resolve_weibull_reference_paths(
+            spacing=None,
+            cache_dir=cache_dir,
+            github_repository=github_repository,
+            release_tag=release_tag,
+            github_token=github_token,
+        )
+    else:
+        baseline_path = Path(params_baseline_path)
+        manipulator_path = Path(params_manipulator_path)
+
+    k_b, a_b, _, _ = load_pointwise_params(
+        baseline_path,
+        station_lat=locations.lat,
+        station_lon=locations.lon,
+    )
+    k_m, a_m, _, _ = load_pointwise_params(
+        manipulator_path,
+        station_lat=locations.lat,
+        station_lon=locations.lon,
+    )
+    if era5_checkpoint_path.exists():
+        print(f"pointwise: loading ERA5 checkpoint {era5_checkpoint_path}")
+        wind = load_pointwise_wind_checkpoint(era5_checkpoint_path)
+    else:
+        print(
+            "pointwise: loading all selected ERA5 cells from the Earth Data Hub",
+            flush=True,
+        )
+        wind = get_pointwise_wind_da(
+            locations=locations,
+            start=start,
+            end=end,
+            edh_key=edh_key,
+            edh_path=edh_path,
+            height=height,
+            u_var=u_var,
+            v_var=v_var,
+            time_dim=time_dim,
+            chunks={"time": int(edh_time_chunk)},
+        )
+        temporary_era5_path = Path(f"{era5_checkpoint_path}.tmp")
+        if temporary_era5_path.exists():
+            shutil.rmtree(temporary_era5_path)
+        write_pointwise_wind_checkpoint(wind, temporary_era5_path)
+        temporary_era5_path.replace(era5_checkpoint_path)
+        print(f"pointwise: ERA5 checkpoint written to {era5_checkpoint_path}", flush=True)
+
+    if out_path.exists():
+        if out_path.is_dir():
+            shutil.rmtree(out_path)
+        else:
+            out_path.unlink()
+
+    map_pointwise_to_zarr(
+        mapping_method,
+        wind,
+        k_b,
+        a_b,
+        k_m,
+        a_m,
+        mapping_checkpoint_path,
+        station=locations.station,
+        lat=locations.lat,
+        lon=locations.lon,
+        lat_era5=wind["lat_era5"].values,
+        lon_era5=wind["lon_era5"].values,
+        chunks=DEFAULT_CHUNKS,
+        compressor=_default_compressor(),
+        storage_dtype="int16",
+        scale=DEFAULT_SCALE,
+        resume=mapping_checkpoint_path.exists(),
+    )
+    mapping_checkpoint_path.replace(out_path)
+    if not keep_download and era5_checkpoint_path.exists():
+        shutil.rmtree(era5_checkpoint_path)
+    return out_path

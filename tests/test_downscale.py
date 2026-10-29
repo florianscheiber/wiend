@@ -13,6 +13,7 @@ from wiend.downscale import (
     _default_compressor,
     _normalize_spacing,
     downscale,
+    map_pointwise_to_zarr,
     map_weibull_field_to_zarr,
 )
 
@@ -117,6 +118,47 @@ class TestSpacing:
         result = xr.open_zarr(tmp_path / "out.zarr", consolidated=False)["wind"]
         assert result.shape == (1, 2, 2)
         np.testing.assert_allclose(result.values, [[[13.5, 17.5], [45.5, 49.5]]])
+
+
+def test_pointwise_mapping_can_resume_checkpoint(tmp_path, capsys):
+    wind = xr.DataArray(
+        np.arange(8, dtype=np.float32).reshape(2, 4),
+        dims=("time", "station"),
+        coords={"time": [0, 1], "station": ["a", "b", "c", "d"]},
+    )
+    params = xr.DataArray(
+        np.ones(4, dtype=np.float32),
+        dims=("station",),
+        coords={"station": ["a", "b", "c", "d"]},
+    )
+    checkpoint = tmp_path / "checkpoint.zarr"
+    kwargs = {
+        "mapping_method": "dummy",
+        "original_wind": wind,
+        "k_b": params,
+        "a_b": params,
+        "k_m": params,
+        "a_m": params,
+        "path_out": checkpoint,
+        "station": np.array(["a", "b", "c", "d"]),
+        "lat": np.arange(4, dtype=np.float32),
+        "lon": np.arange(4, dtype=np.float32),
+        "lat_era5": np.arange(4, dtype=np.float32),
+        "lon_era5": np.arange(4, dtype=np.float32),
+        "chunks": {"time": 1, "station": 2},
+        "compressor": _default_compressor(),
+        "storage_dtype": "float32",
+    }
+
+    map_pointwise_to_zarr(**kwargs)
+    first_output = capsys.readouterr().out
+    assert "4/4 chunks complete" in first_output
+
+    map_pointwise_to_zarr(**kwargs, resume=True)
+    second_output = capsys.readouterr().out
+    assert "4/4 chunks complete" in second_output
+    result = xr.open_zarr(checkpoint, consolidated=False)["wind"]
+    np.testing.assert_allclose(result.values, wind.values)
 
     @pytest.mark.parametrize("spacing", [0, -0.0025, 0.003, float("nan")])
     def test_invalid_spacing_is_rejected(self, spacing):

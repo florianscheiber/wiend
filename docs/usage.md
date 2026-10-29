@@ -213,6 +213,29 @@ Important parameter:
   `<out>.era5.zarr` after successful mapping. Set it to `True` to retain the
   intermediate ERA5 Zarr. It is retained automatically when mapping fails.
 
+### Experimental pointwise mode
+
+On the `experiment/pointwise` branch, pass `stations` instead of `bbox` to
+process a station Zarr. Only its `station`, `lat`, and `lon` coordinates are
+used; its time axis and data variables are ignored.
+
+```python
+out_path = wd.download_and_downscale(
+    stations="stations.zarr",
+    start="2020-01-01",
+    end="2020-12-31",
+    out="pointwise.zarr",
+    mapping_method="qm",
+    edh_key="your-token",
+)
+```
+
+The selected ERA5 time series are materialized once in
+`<out>.pointwise.era5.zarr`. Mapping progress is stored separately in
+`<out>.pointwise.mapping.zarr`, so interrupted runs can continue without
+re-reading ERA5. Both checkpoint stores are removed after success unless
+`keep_download=True` is used for the ERA5 checkpoint.
+
 ## Weibull data and local cache
 
 The reference maps are distributed separately from the Python package in the
