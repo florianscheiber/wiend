@@ -208,7 +208,9 @@ def download_and_downscale(
     stations: str | Path | None = None,
     start: str,
     end: str,
-    out: str | Path,
+    out: str | Path | None = None,
+    out_baseline: str | Path | None = None,
+    out_corrected: str | Path | None = None,
     mapping_method: str,
     params_baseline_path: str | Path | None = None,
     params_manipulator_path: str | Path | None = None,
@@ -233,11 +235,16 @@ def download_and_downscale(
     if stations is not None:
         if bbox is not None:
             raise ValueError("Pass either stations or bbox, not both.")
+        if out is not None:
+            raise ValueError("For stations, pass out_baseline and out_corrected instead of out.")
+        if out_baseline is None or out_corrected is None:
+            raise ValueError("For stations, both out_baseline and out_corrected are required.")
         return _download_and_downscale_pointwise(
             stations=stations,
             start=start,
             end=end,
-            out=out,
+            out_baseline=out_baseline,
+            out_corrected=out_corrected,
             mapping_method=mapping_method,
             params_baseline_path=params_baseline_path,
             params_manipulator_path=params_manipulator_path,
@@ -257,6 +264,10 @@ def download_and_downscale(
         )
     if bbox is None:
         raise ValueError("bbox is required unless stations is provided.")
+    if out is None:
+        raise ValueError("out is required for gridded processing.")
+    if out_baseline is not None or out_corrected is not None:
+        raise ValueError("out_baseline and out_corrected are only valid with stations.")
 
     out_path = Path(out)
     download_path = Path(f"{out_path}.era5.zarr")
@@ -309,7 +320,8 @@ def _download_and_downscale_pointwise(
     stations: str | Path,
     start: str,
     end: str,
-    out: str | Path,
+    out_baseline: str | Path,
+    out_corrected: str | Path,
     mapping_method: str,
     params_baseline_path: str | Path | None,
     params_manipulator_path: str | Path | None,
@@ -329,15 +341,17 @@ def _download_and_downscale_pointwise(
 ) -> Path:
     """Run the experimental station-based download and downscale workflow."""
     locations = load_station_locations(stations)
-    out_path = Path(out)
-    era5_checkpoint_path = Path(f"{out_path}.pointwise.era5.zarr")
-    mapping_checkpoint_path = Path(f"{out_path}.pointwise.mapping.zarr")
-    if out_path.exists() and not overwrite:
-        raise ValueError(f"Output {out_path} exists; set overwrite=True to replace.")
+    baseline_output_path = Path(out_baseline)
+    corrected_path = Path(out_corrected)
+    era5_checkpoint_path = Path(f"{corrected_path}.pointwise.era5.zarr")
+    mapping_checkpoint_path = Path(f"{corrected_path}.pointwise.mapping.zarr")
+    for output_path in (baseline_output_path, corrected_path):
+        if output_path.exists() and not overwrite:
+            raise ValueError(f"Output {output_path} exists; set overwrite=True to replace.")
     if params_baseline_path is None or params_manipulator_path is None:
         from wiend.data_manager import resolve_weibull_reference_paths
 
-        baseline_path, manipulator_path = resolve_weibull_reference_paths(
+        params_baseline, manipulator_path = resolve_weibull_reference_paths(
             spacing=None,
             cache_dir=cache_dir,
             github_repository=github_repository,
@@ -345,11 +359,11 @@ def _download_and_downscale_pointwise(
             github_token=github_token,
         )
     else:
-        baseline_path = Path(params_baseline_path)
+        params_baseline = Path(params_baseline_path)
         manipulator_path = Path(params_manipulator_path)
 
-    k_b, a_b, _, _ = load_pointwise_params(
-        baseline_path,
+    k_b, a_b, lat_weibull, lon_weibull = load_pointwise_params(
+        params_baseline,
         station_lat=locations.lat,
         station_lon=locations.lon,
     )
@@ -385,11 +399,31 @@ def _download_and_downscale_pointwise(
         temporary_era5_path.replace(era5_checkpoint_path)
         print(f"pointwise: ERA5 checkpoint written to {era5_checkpoint_path}", flush=True)
 
-    if out_path.exists():
-        if out_path.is_dir():
-            shutil.rmtree(out_path)
+    if baseline_output_path.exists():
+        if baseline_output_path.is_dir():
+            shutil.rmtree(baseline_output_path)
         else:
-            out_path.unlink()
+            baseline_output_path.unlink()
+    baseline_tmp = Path(f"{baseline_output_path}.tmp")
+    if baseline_tmp.exists():
+        shutil.rmtree(baseline_tmp)
+    write_pointwise_wind_checkpoint(
+        wind,
+        baseline_tmp,
+        attrs={
+            "output_role": "raw_era5_baseline",
+            "start": start,
+            "end": end,
+            "height": height,
+            "edh_path": edh_path or EDH_DEFAULT_PATH,
+            "station_input": str(stations),
+        },
+    )
+    baseline_tmp.replace(baseline_output_path)
+    print(
+        f"pointwise: raw ERA5 baseline written to {baseline_output_path}",
+        flush=True,
+    )
 
     map_pointwise_to_zarr(
         mapping_method,
@@ -404,13 +438,30 @@ def _download_and_downscale_pointwise(
         lon=locations.lon,
         lat_era5=wind["lat_era5"].values,
         lon_era5=wind["lon_era5"].values,
+        lat_weibull=lat_weibull,
+        lon_weibull=lon_weibull,
         chunks=DEFAULT_CHUNKS,
         compressor=_default_compressor(),
         storage_dtype="int16",
         scale=DEFAULT_SCALE,
         resume=mapping_checkpoint_path.exists(),
+        output_attrs={
+            "output_role": "corrected",
+            "start": start,
+            "end": end,
+            "height": height,
+            "edh_path": edh_path or EDH_DEFAULT_PATH,
+            "station_input": str(stations),
+            "params_baseline_path": str(params_baseline),
+            "params_manipulator_path": str(manipulator_path),
+        },
     )
-    mapping_checkpoint_path.replace(out_path)
+    if corrected_path.exists():
+        if corrected_path.is_dir():
+            shutil.rmtree(corrected_path)
+        else:
+            corrected_path.unlink()
+    mapping_checkpoint_path.replace(corrected_path)
     if not keep_download and era5_checkpoint_path.exists():
         shutil.rmtree(era5_checkpoint_path)
-    return out_path
+    return corrected_path

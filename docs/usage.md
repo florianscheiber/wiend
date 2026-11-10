@@ -236,6 +236,17 @@ The selected ERA5 time series are materialized once in
 re-reading ERA5. Both checkpoint stores are removed after success unless
 `keep_download=True` is used for the ERA5 checkpoint.
 
+Pointwise outputs use these coordinate names:
+
+- `lat`/`lon`: original station coordinates from the input station Zarr.
+- `lat_era5`/`lon_era5`: coordinates of the nearest ERA5 cell centre used
+  for the raw ERA5 time series.
+- `lat_weibull`/`lon_weibull`: coordinates of the nearest Weibull parameter
+  map cell used for the mapping.
+
+The coordinate attributes in the Zarr stores repeat these definitions so the
+meaning remains visible when inspecting the output without the source code.
+
 ## Weibull data and local cache
 
 The reference maps are distributed separately from the Python package in the

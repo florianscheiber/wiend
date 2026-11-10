@@ -109,14 +109,20 @@ def test_download_and_downscale_pointwise_writes_station_output(monkeypatch, tmp
     monkeypatch.setattr(
         download_module,
         "load_pointwise_params",
-        lambda *args, **kwargs: (params, params, np.array([]), np.array([])),
+        lambda *args, **kwargs: (
+            params,
+            params,
+            np.array([50.0, 50.25]),
+            np.array([8.0, 8.25]),
+        ),
     )
 
     result = download_module.download_and_downscale(
         stations=stations_path,
         start="2020-01-01",
         end="2020-01-02",
-        out=tmp_path / "result.zarr",
+        out_baseline=tmp_path / "baseline-output.zarr",
+        out_corrected=tmp_path / "result.zarr",
         mapping_method="dummy",
         params_baseline_path=tmp_path / "baseline.zarr",
         params_manipulator_path=tmp_path / "corrected.zarr",
@@ -124,6 +130,8 @@ def test_download_and_downscale_pointwise_writes_station_output(monkeypatch, tmp
     )
 
     assert result == tmp_path / "result.zarr"
+    baseline = xr.open_zarr(tmp_path / "baseline-output.zarr", consolidated=False)
+    np.testing.assert_allclose(baseline["wind"].values, [[2.0, 3.0]])
     output = xr.open_zarr(result, consolidated=False)
     assert output["time"].values.tolist() == [0]
     assert output["station"].values.tolist() == ["a", "b"]

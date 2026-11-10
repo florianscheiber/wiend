@@ -145,6 +145,8 @@ def test_pointwise_mapping_can_resume_checkpoint(tmp_path, capsys):
         "lon": np.arange(4, dtype=np.float32),
         "lat_era5": np.arange(4, dtype=np.float32),
         "lon_era5": np.arange(4, dtype=np.float32),
+        "lat_weibull": np.arange(4, dtype=np.float32),
+        "lon_weibull": np.arange(4, dtype=np.float32),
         "chunks": {"time": 1, "station": 2},
         "compressor": _default_compressor(),
         "storage_dtype": "float32",

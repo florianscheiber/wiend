@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Literal
 
+import dask.array as dask_array
 import numpy as np
 import xarray as xr
 import zarr
@@ -191,6 +192,8 @@ def init_pointwise_zarr(
     lon: np.ndarray,
     lat_era5: np.ndarray,
     lon_era5: np.ndarray,
+    lat_weibull: np.ndarray,
+    lon_weibull: np.ndarray,
     chunks: dict[str, int],
     compressor: Any,
     storage_dtype: Literal["float32", "int16"],
@@ -200,36 +203,8 @@ def init_pointwise_zarr(
     attrs: dict[str, Any] | None = None,
 ) -> zarr.Group:
     """Create a station-oriented Zarr store using the standard wind encoding."""
-    root = zarr.open_group(str(path_out), mode="w")
     station_chunk = int(chunks.get("station", chunks.get("lat", 100)))
     time_chunk = int(chunks.get("time", 168))
-    root.create_array(
-        "time",
-        data=time_values,
-        overwrite=True,
-        chunks=(min(time_values.size, time_chunk),),
-        dimension_names=("time",),
-    )
-    root.create_array(
-        "station",
-        data=station,
-        overwrite=True,
-        chunks=(min(station.size, station_chunk),),
-        dimension_names=("station",),
-    )
-    for name, values in (
-        ("lat", lat),
-        ("lon", lon),
-        ("lat_era5", lat_era5),
-        ("lon_era5", lon_era5),
-    ):
-        root.create_array(
-            name,
-            data=np.asarray(values, dtype=np.float32),
-            overwrite=True,
-            chunks=(min(station.size, station_chunk),),
-            dimension_names=("station",),
-        )
 
     if storage_dtype == "float32":
         dtype = np.dtype("float32")
@@ -243,20 +218,92 @@ def init_pointwise_zarr(
             "add_offset": float(add_offset),
             "_FillValue": int(fill_value),
         }
-    wind_arr = root.create_array(
-        "wind",
-        shape=(time_values.size, station.size),
-        chunks=(min(time_values.size, time_chunk), min(station.size, station_chunk)),
-        dtype=dtype,
-        overwrite=True,
-        fill_value=fill,
-        compressors=compressor,
-        dimension_names=("time", "station"),
+    ds = xr.Dataset(
+        {
+            "wind": (
+                ("time", "station"),
+                dask_array.zeros(
+                    (time_values.size, station.size),
+                    chunks=(
+                        min(time_values.size, time_chunk),
+                        min(station.size, station_chunk),
+                    ),
+                    dtype=dtype,
+                ),
+            )
+        },
+        coords={
+            "time": time_values,
+            "station": station,
+            "lat": ("station", np.asarray(lat, dtype=np.float32)),
+            "lon": ("station", np.asarray(lon, dtype=np.float32)),
+            "lat_era5": ("station", np.asarray(lat_era5, dtype=np.float32)),
+            "lon_era5": ("station", np.asarray(lon_era5, dtype=np.float32)),
+            "lat_weibull": ("station", np.asarray(lat_weibull, dtype=np.float32)),
+            "lon_weibull": ("station", np.asarray(lon_weibull, dtype=np.float32)),
+        },
     )
+    ds["wind"].encoding = {
+        "dtype": dtype,
+        "chunks": (
+            min(time_values.size, time_chunk),
+            min(station.size, station_chunk),
+        ),
+        "_FillValue": fill,
+    }
+    ds.to_zarr(
+        str(path_out),
+        mode="w",
+        compute=False,
+        consolidated=False,
+        zarr_format=2,
+    )
+    root = zarr.open_group(str(path_out), mode="a")
+    wind_arr = root["wind"]
     wind_arr.attrs.update(wind_attrs)
+    root["lat"].attrs.update(
+        {
+            "long_name": "station latitude",
+            "description": "Original latitude from the station input Zarr.",
+        }
+    )
+    root["lon"].attrs.update(
+        {
+            "long_name": "station longitude",
+            "description": "Original longitude from the station input Zarr.",
+        }
+    )
+    root["lat_era5"].attrs.update(
+        {
+            "long_name": "ERA5 cell-centre latitude",
+            "description": (
+                "Latitude of the nearest ERA5 grid-cell centre used for the raw time series."
+            ),
+        }
+    )
+    root["lon_era5"].attrs.update(
+        {
+            "long_name": "ERA5 cell-centre longitude",
+            "description": (
+                "Longitude of the nearest ERA5 grid-cell centre used for the raw time series."
+            ),
+        }
+    )
+    root["lat_weibull"].attrs.update(
+        {
+            "long_name": "Weibull cell-centre latitude",
+            "description": "Latitude of the nearest Weibull parameter-map cell used for mapping.",
+        }
+    )
+    root["lon_weibull"].attrs.update(
+        {
+            "long_name": "Weibull cell-centre longitude",
+            "description": "Longitude of the nearest Weibull parameter-map cell used for mapping.",
+        }
+    )
+
     if attrs:
         root.attrs.update(attrs)
-    root.attrs.update({"_ARRAY_DIMENSIONS": ["time", "station"]})
     return root
 
 
@@ -274,6 +321,8 @@ def map_pointwise_to_zarr(
     lon: np.ndarray,
     lat_era5: np.ndarray,
     lon_era5: np.ndarray,
+    lat_weibull: np.ndarray,
+    lon_weibull: np.ndarray,
     chunks: dict[str, int],
     compressor: Any,
     storage_dtype: Literal["float32", "int16"],
@@ -282,6 +331,7 @@ def map_pointwise_to_zarr(
     fill_value: int = -32768,
     eps_q: float = 1e-6,
     resume: bool = False,
+    output_attrs: dict[str, Any] | None = None,
 ) -> None:
     """Map ERA5 station time series and write the standard encoded Zarr output."""
     method = mapping_method.lower()
@@ -300,7 +350,10 @@ def map_pointwise_to_zarr(
             raise ValueError(f"{name} must have dims {expected}, got {da.dims}")
 
     station_count = station.size
-    if any(values.size != station_count for values in (lat, lon, lat_era5, lon_era5)):
+    if any(
+        values.size != station_count
+        for values in (lat, lon, lat_era5, lon_era5, lat_weibull, lon_weibull)
+    ):
         raise ValueError("Pointwise station coordinates must have the same length.")
     if original_wind.sizes["station"] != station_count:
         raise ValueError("original_wind station dimension does not match station coordinates.")
@@ -321,6 +374,8 @@ def map_pointwise_to_zarr(
         "spacing": None,
         checkpoint_key: "[]",
     }
+    if output_attrs:
+        attrs.update(output_attrs)
     checkpoint_path = Path(path_out)
     if resume and checkpoint_path.exists():
         root = zarr.open_group(str(checkpoint_path), mode="a")
@@ -336,6 +391,8 @@ def map_pointwise_to_zarr(
             lon=lon,
             lat_era5=lat_era5,
             lon_era5=lon_era5,
+            lat_weibull=lat_weibull,
+            lon_weibull=lon_weibull,
             chunks={"time": time_chunk, "station": station_chunk},
             compressor=compressor,
             storage_dtype=storage_dtype,
