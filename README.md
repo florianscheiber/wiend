@@ -3,6 +3,21 @@
 Python library for downloading ERA5 wind speed time series from Earth Data
 Hub and applying Weibull-based downscaling and bias correction.
 
+## Overview
+
+wiend is an on-demand Python library for generating bias-corrected and downscaled 
+hourly 10 m wind-speed time series across Europe.
+Users specify a spatial domain, a time period, and a correction method. 
+The library automatically retrieves ERA5 wind data from Earth Data Hub (EDH), 
+computes wind speed from the ERA5 u/v wind components, and applies Weibull-based bias correction and 
+downscaling using precomputed parameter maps.
+The native output grid has a spatial resolution of 0.0025°, covering Europe and adjacent land areas 
+approximately between 35°N–71.5°N and 25°W–45°E. Larger grid spacings can be generated 
+through spatial aggregation after the correction step.
+The output preserves the hourly temporal variability of ERA5 while adjusting the underlying 
+wind-speed distribution using statistical correction methods. Results are stored as 
+chunked Zarr datasets and can be processed efficiently for large domains and long time periods.
+
 ## Features
 
 - Download ERA5 wind data from Earth Data Hub
